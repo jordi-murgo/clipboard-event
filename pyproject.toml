@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clipboard-event"
+version = "0.1.0"
+description = "Cross-platform clipboard change notifications for Python"
+authors = [
+    { name = "Jordi Murgó", email = "jordi.murgo@gmail.com" },
+]
+maintainers = [
+    { name = "Jordi Murgó", email = "jordi.murgo@gmail.com" },
+]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["clipboard", "events", "notifications", "windows", "macos"]
+requires-python = ">=3.10"
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/jordi-murgo/clipboard-event"
+Repository = "https://github.com/jordi-murgo/clipboard-event.git"
+Issues = "https://github.com/jordi-murgo/clipboard-event/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+clipboard_event = ["py.typed"]
