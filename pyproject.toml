@@ -15,7 +15,8 @@ maintainers = [
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["clipboard", "events", "notifications", "windows", "macos"]
+keywords = ["clipboard", "events", "notifications", "windows", "macos", "linux"]
+
 requires-python = ">=3.10"
 dependencies = []
 classifiers = [
@@ -28,6 +29,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Typing :: Typed",
 ]
 

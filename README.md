@@ -2,10 +2,12 @@
 
 [![CI](https://github.com/jordi-murgo/clipboard-event/actions/workflows/ci.yml/badge.svg)](https://github.com/jordi-murgo/clipboard-event/actions/workflows/ci.yml)
 
-`clipboard-event` provides clipboard text access and change callbacks for Python on Windows and macOS. It uses native change notifications where available and has no runtime dependencies.
+`clipboard-event` provides clipboard text access and change callbacks for Python on Windows, macOS, and Linux. It uses native change notifications where available and has no runtime dependencies.
 
 - **Windows:** reads and writes Unicode text through Win32 and listens for `WM_CLIPBOARDUPDATE` on a message-only window.
 - **macOS:** reads and writes through `pbpaste` and `pbcopy`, then observes `NSPasteboard.changeCount` without polling clipboard content continuously.
+- **Linux / Wayland:** reads and writes through `wl-paste` and `wl-copy`, then uses `wl-paste --watch` for event-driven change detection with zero idle CPU.
+- **Linux / X11:** reads and writes through `xclip` (fallback `xsel`) and polls with content hashing, since X11 has no clipboard-change notification.
 - If native monitoring cannot start on a supported platform, the library falls back to polling. Other platforms fail explicitly.
 
 ## Installation
@@ -64,7 +66,7 @@ Callbacks run sequentially on one Python dispatcher thread, never on a native wa
 For diagnostics, inspect the selected backend:
 
 ```python
-print(clipboard.backend_name)  # "win32", "macos", or "polling"
+print(clipboard.backend_name)  # "win32", "macos", "wayland", "x11", or "polling"
 ```
 
 ## Support
@@ -73,6 +75,8 @@ print(clipboard.backend_name)  # "win32", "macos", or "polling"
 | --- | --- | --- | --- |
 | Windows | 3.10–3.14 | Win32 Unicode text | `WM_CLIPBOARDUPDATE`, with polling fallback |
 | macOS | 3.10–3.14 | `pbcopy` / `pbpaste` | `NSPasteboard.changeCount`, with polling fallback |
+| Linux / Wayland | 3.10–3.14 | `wl-copy` / `wl-paste` | `wl-paste --watch`, with polling fallback |
+| Linux / X11 | 3.10–3.14 | `xclip` (fallback `xsel`) | Content-hash polling |
 | Other platforms | — | Unsupported | Unsupported |
 
 The package is pure Python. Its wheel is universal because platform integration happens at runtime through the standard library and system tools; no compiled extension is included.

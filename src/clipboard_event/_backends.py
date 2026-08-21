@@ -429,6 +429,153 @@ class _WindowsBackend:
             monitor.close()
 
 
+class _WaylandWatch:
+    """Event-driven clipboard monitor using ``wl-paste --watch``.
+
+    ``wl-paste --watch cat`` prints clipboard content on every change.
+    A reader thread hashes each output line and bumps ``revision`` when
+    the hash differs, waking waiters via a :class:`~threading.Condition`.
+    Zero CPU when idle — no polling.
+    """
+    backend_name = "wayland"
+
+    def __init__(self) -> None:
+        import hashlib
+        import shutil
+        if not shutil.which("wl-paste"):
+            raise RuntimeError("wl-paste not found")
+        self._condition = threading.Condition()
+        self._revision = 0
+        self._running = True
+        self._proc: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
+        initial = subprocess.run(["wl-paste"], capture_output=True, text=True, timeout=5)
+        self._last_hash = hashlib.sha256(initial.stdout.encode()).digest()
+        self._proc = subprocess.Popen(
+            ["wl-paste", "--watch", "cat"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        self._thread = threading.Thread(target=self._watch_loop, daemon=True, name="clipboard-event-wayland")
+        self._thread.start()
+
+    def _watch_loop(self) -> None:
+        import hashlib
+        assert self._proc is not None and self._proc.stdout is not None
+        for line in self._proc.stdout:
+            if not self._running:
+                break
+            text = line.decode("utf-8", errors="replace")
+            h = hashlib.sha256(text.encode("utf-8", errors="replace")).digest()
+            if h == self._last_hash:
+                continue
+            self._last_hash = h
+            with self._condition:
+                self._revision += 1
+                self._condition.notify_all()
+
+    @property
+    def revision(self) -> int:
+        with self._condition:
+            return self._revision
+
+    def wait_for_revision(self, after: int, timeout: float) -> int:
+        with self._condition:
+            if self._revision <= after:
+                self._condition.wait_for(lambda: self._revision > after, timeout)
+            return self._revision
+
+    def close(self) -> None:
+        self._running = False
+        if self._proc is not None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+
+
+class _WaylandBackend:
+    def __init__(self) -> None:
+        self._monitor = None
+
+    @property
+    def backend_name(self) -> str:
+        return "polling" if isinstance(self._monitor, _PollingRevision) else "wayland"
+
+    def read(self) -> str | None:
+        result = subprocess.run(["wl-paste"], capture_output=True, text=True, timeout=5)
+        return result.stdout if result.returncode == 0 else None
+
+    def write(self, value: str) -> None:
+        subprocess.run(["wl-copy", value], check=True, timeout=5)
+
+    def start_monitor(self) -> None:
+        if self._monitor is not None:
+            return
+        try:
+            self._monitor = _WaylandWatch()
+        except Exception:
+            self._monitor = _PollingRevision(self.read)
+
+    @property
+    def revision(self) -> int:
+        self.start_monitor()
+        return self._monitor.revision
+
+    def wait_for_revision(self, after: int, timeout: float) -> int:
+        self.start_monitor()
+        return self._monitor.wait_for_revision(after, timeout)
+
+    def close_monitor(self) -> None:
+        monitor, self._monitor = self._monitor, None
+        if monitor is not None:
+            monitor.close()
+
+
+class _X11Backend:
+    def __init__(self) -> None:
+        import shutil
+        self._monitor = None
+        self._use_xclip = shutil.which("xclip") is not None
+
+    @property
+    def backend_name(self) -> str:
+        return "x11"
+
+    def read(self) -> str | None:
+        cmd = ["xclip", "-selection", "clipboard", "-o"] if self._use_xclip else ["xsel", "--clipboard", "--output"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        return result.stdout if result.returncode == 0 else None
+
+    def write(self, value: str) -> None:
+        if self._use_xclip:
+            subprocess.run(["xclip", "-selection", "clipboard"], input=value, text=True, check=True, timeout=5)
+        else:
+            subprocess.run(["xsel", "--clipboard", "--input"], input=value, text=True, check=True, timeout=5)
+
+    def start_monitor(self) -> None:
+        if self._monitor is not None:
+            return
+        self._monitor = _PollingRevision(self.read)
+
+    @property
+    def revision(self) -> int:
+        self.start_monitor()
+        return self._monitor.revision
+
+    def wait_for_revision(self, after: int, timeout: float) -> int:
+        self.start_monitor()
+        return self._monitor.wait_for_revision(after, timeout)
+
+    def close_monitor(self) -> None:
+        monitor, self._monitor = self._monitor, None
+        if monitor is not None:
+            monitor.close()
+
+
 class _UnsupportedBackend:
     backend_name = "unsupported"
 
@@ -449,10 +596,23 @@ class _UnsupportedBackend:
         pass
 
 
+def _create_linux_backend():
+    """Select Wayland or X11 backend based on environment."""
+    import os
+    import shutil
+    if os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-paste"):
+        return _WaylandBackend()
+    if shutil.which("xclip") or shutil.which("xsel"):
+        return _X11Backend()
+    return _UnsupportedBackend()
+
+
 def create_backend():
     system = platform.system()
     if system == "Windows":
         return _WindowsBackend()
     if system == "Darwin":
         return _MacBackend()
+    if system == "Linux":
+        return _create_linux_backend()
     return _UnsupportedBackend()
