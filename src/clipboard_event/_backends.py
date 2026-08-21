@@ -378,7 +378,7 @@ class _WindowsBackend:
         kernel32.GlobalFree.argtypes = [wintypes.HANDLE]
         kernel32.GlobalFree.restype = wintypes.HANDLE
         buffer = (value + "\0").encode("utf-16-le")
-        for _ in range(5):
+        for _ in range(10):
             if user32.OpenClipboard(0):
                 try:
                     user32.EmptyClipboard()
@@ -403,7 +403,7 @@ class _WindowsBackend:
                             kernel32.GlobalFree(handle)
                 finally:
                     user32.CloseClipboard()
-            time.sleep(0.05)
+            time.sleep(0.1)
         raise OSError("clipboard is busy")
 
     def start_monitor(self) -> None:
