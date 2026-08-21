@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clipboard-event"
-version = "0.2.1"
+version = "0.2.2"
 description = "Cross-platform clipboard change notifications for Python"
 authors = [
     { name = "Jordi Murgó", email = "jordi.murgo@gmail.com" },

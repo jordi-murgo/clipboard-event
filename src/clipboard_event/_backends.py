@@ -321,6 +321,76 @@ class _WindowsListener:
         self._thread.join(timeout=1.0)
 
 
+def _windows_write_once(user32, kernel32, buffer: bytes) -> bool:
+    """Run one open -> empty -> set -> close clipboard write attempt.
+
+    Returns ``True`` when ownership of ``buffer`` transferred to the system
+    clipboard. Returns ``False`` when the clipboard could not be opened
+    because another process currently holds it, so the caller can retry.
+    Raises :class:`OSError` for failures inside an open clipboard sequence;
+    callers treat those as transient because the Windows clipboard is a
+    shared resource contended by clipboard managers, RDP redirection
+    (rdpclip), and peer clipboard tunnels.
+    """
+    import ctypes
+
+    if not user32.OpenClipboard(0):
+        return False
+    try:
+        if not user32.EmptyClipboard():
+            raise OSError("EmptyClipboard failed")
+        handle = kernel32.GlobalAlloc(0x0002, len(buffer))
+        if not handle:
+            raise OSError("GlobalAlloc failed")
+        transferred = False
+        try:
+            pointer = kernel32.GlobalLock(handle)
+            if not pointer:
+                raise OSError("GlobalLock failed")
+            try:
+                ctypes.memmove(pointer, buffer, len(buffer))
+            finally:
+                kernel32.GlobalUnlock(handle)
+            if not user32.SetClipboardData(13, handle):
+                try:
+                    detail = f" (Win32 error {kernel32.GetLastError()})"
+                except Exception:
+                    detail = ""
+                raise OSError(f"SetClipboardData failed{detail}")
+            transferred = True
+            return True
+        finally:
+            if not transferred:
+                kernel32.GlobalFree(handle)
+    finally:
+        user32.CloseClipboard()
+
+
+def _windows_write_with_retry(
+    user32,
+    kernel32,
+    buffer: bytes,
+    attempts: int = 10,
+    backoff: float = 0.1,
+    sleep=time.sleep,
+) -> None:
+    """Write ``buffer`` to the Windows clipboard, retrying transient races.
+
+    Both a busy clipboard (``OpenClipboard`` denied) and mid-sequence
+    failures (``SetClipboardData`` lost a race against a peer) are retried
+    with a fixed backoff. Only persistent failure past ``attempts`` tries
+    raises, carrying the last underlying error.
+    """
+    last_error: OSError | None = None
+    for _ in range(attempts):
+        try:
+            if _windows_write_once(user32, kernel32, buffer):
+                return
+        except OSError as error:
+            last_error = error
+        sleep(backoff)
+    detail = f": {last_error}" if last_error is not None else ""
+    raise OSError(f"clipboard is busy after {attempts} attempts{detail}")
 class _WindowsBackend:
     def __init__(self) -> None:
         self._monitor = None
@@ -358,7 +428,6 @@ class _WindowsBackend:
                 finally:
                     user32.CloseClipboard()
             time.sleep(0.05)
-        return None
 
     def write(self, value: str) -> None:
         import ctypes
@@ -377,34 +446,9 @@ class _WindowsBackend:
         kernel32.GlobalUnlock.restype = wintypes.BOOL
         kernel32.GlobalFree.argtypes = [wintypes.HANDLE]
         kernel32.GlobalFree.restype = wintypes.HANDLE
-        buffer = (value + "\0").encode("utf-16-le")
-        for _ in range(10):
-            if user32.OpenClipboard(0):
-                try:
-                    user32.EmptyClipboard()
-                    handle = kernel32.GlobalAlloc(0x0002, len(buffer))
-                    if not handle:
-                        raise OSError("GlobalAlloc failed")
-                    transferred = False
-                    try:
-                        pointer = kernel32.GlobalLock(handle)
-                        if not pointer:
-                            raise OSError("GlobalLock failed")
-                        try:
-                            ctypes.memmove(pointer, buffer, len(buffer))
-                        finally:
-                            kernel32.GlobalUnlock(handle)
-                        if not user32.SetClipboardData(13, handle):
-                            raise OSError("SetClipboardData failed")
-                        transferred = True
-                        return
-                    finally:
-                        if not transferred:
-                            kernel32.GlobalFree(handle)
-                finally:
-                    user32.CloseClipboard()
-            time.sleep(0.1)
-        raise OSError("clipboard is busy")
+        _windows_write_with_retry(
+            user32, kernel32, (value + "\0").encode("utf-16-le")
+        )
 
     def start_monitor(self) -> None:
         if self._monitor is not None:
