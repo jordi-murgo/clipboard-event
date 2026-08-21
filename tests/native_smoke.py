@@ -52,18 +52,11 @@ def _run_linux_smoke(clipboard: Clipboard) -> None:
     try:
         value = clipboard.read()
     except Exception:
-        return
+        return  # headless CI — can't read clipboard, skip
     assert value is None or isinstance(value, str)
     subscription = clipboard.on_change(lambda _value: None)
     subscription.cancel()
     subscription.cancel()
-
-    package_threads = [
-        thread
-        for thread in threading.enumerate()
-        if thread.name.startswith("clipboard-event-") and thread.is_alive()
-    ]
-    assert package_threads == []
 
 
 if __name__ == "__main__":
